@@ -37,8 +37,9 @@ def check_reminders():
     # 1. 翌日の1限チェック [cite: 26, 42]
     try:
         # 明日の日付のスケジュールを明示的に public スキーマから取得
-        schedule_res = (
-            supabase.table("schedules")
+       schedule_res = (
+            supabase.schema("public")
+            .table("schedules")
             .select("has_first_period")
             .eq("target_date", tomorrow.isoformat())
             .execute()
@@ -54,8 +55,9 @@ def check_reminders():
 
     # 2. 2日後の宿題締切チェック [cite: 26, 42]
     try:
-        assignment_res = (
-            supabase.table("assignments")
+       assignment_res = (
+            supabase.schema("public")
+            .table("assignments")
             .select("title")
             .eq("due_date", two_days_later.isoformat())
             .execute()
