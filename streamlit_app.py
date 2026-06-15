@@ -6,17 +6,13 @@ from supabase import create_client, Client
 st.set_page_config(page_title="Moochi Moochi プロトタイプ", page_icon="🤖", layout="centered")
 
 # ---------------------------------------------------------
-# 🔑 Supabase 接続の初期化（診断ツールで成功した最強の設定）
+# 🔑 Supabase 接続の初期化
 # ---------------------------------------------------------
 @st.cache_resource
 def init_supabase() -> Client:
-    # Secretsから読み込み
     raw_url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
-    
-    # 念のため、URLに不要なパスが混ざっていても自動で綺麗にする処理
     clean_url = raw_url.replace("/rest/v1/", "").replace("/rest/v1", "").rstrip("/")
-    
     return create_client(clean_url, key)
 
 try:
@@ -38,23 +34,30 @@ def check_reminders():
 
     reminders_triggered = False
 
-    # 1. 翌日の1限チェック
-    try:
-        schedule_res = (
-            supabase.schema("public")
-            .table("schedules")
-            .select("has_first_period")
-            .eq("target_date", tomorrow.isoformat())
-            .execute()
-        )
-        if schedule_res.data and schedule_res.data[0]["has_first_period"]:
-            st.info(
-                "💬 **明日の一限をクリアすれば、週末のゲーム時間がもっと最高になりますよ！** "
-                "今夜は少しだけ早めに布団に入ってみませんか？"
+    # 1. 翌日の「曜日」を判定して1限チェック
+    weekday_idx = tomorrow.weekday() # 0:月, 1:火, 2:水, 3:木, 4:金, 5:土, 6:日
+    weekdays_db_cols = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    
+    # 平日（月〜金）の場合のみデータベースを確認する
+    if weekday_idx < 5:
+        target_col = weekdays_db_cols[weekday_idx]
+        try:
+            schedule_res = (
+                supabase.schema("public")
+                .table("user_schedule")
+                .select(target_col)
+                .eq("id", 1)
+                .execute()
             )
-            reminders_triggered = True
-    except Exception as e:
-        st.error(f"スケジュール確認エラー: {e}")
+            # 明日の曜日にTrue（1限あり）が設定されているか？
+            if schedule_res.data and schedule_res.data[0].get(target_col, False):
+                st.info(
+                    "💬 **明日の一限をクリアすれば、週末のゲーム時間がもっと最高になりますよ！** "
+                    "今夜は少しだけ早めに布団に入ってみませんか？"
+                )
+                reminders_triggered = True
+        except Exception as e:
+            st.error(f"スケジュール確認エラー: {e}")
 
     # 2. 2日後の宿題締切チェック
     try:
@@ -95,7 +98,7 @@ st.markdown("---")
 
 # タブで入力を分離
 tab1, tab2, tab3 = st.tabs(
-    ["⏰ 睡眠ログ記入", "📅 明日の予定記入", "📝 宿題・課題登録"]
+    ["⏰ 睡眠ログ記入", "📅 曜日ごとの1限設定", "📝 宿題・課題登録"]
 )
 
 # --- タブ1: 睡眠時間記入 ---
@@ -116,29 +119,47 @@ with tab1:
             }
             try:
                 supabase.schema("public").table("sleep_logs").insert(data).execute()
-                st.success(
-                    "睡眠ログを保存しました！しっかり記録できているの、素晴らしいですね！"
-                )
+                st.success("睡眠ログを保存しました！しっかり記録できているの、素晴らしいですね！")
             except Exception as e:
                 st.error(f"保存に失敗しました: {e}")
 
-# --- タブ2: 時間割記入 ---
+# --- タブ2: 時間割記入（曜日ベースに進化！） ---
 with tab2:
-    st.header("📅 明日の時間割・予定")
-    with st.form("schedule_form", clear_on_submit=True):
-        target_date = st.date_input("対象日", datetime.date.today() + datetime.timedelta(days=1))
-        has_first_period = st.checkbox("この日は「1限目」がありますか？")
+    st.header("📅 曜日ごとの1限目設定")
+    st.write("1限目がある曜日にチェックを入れておくと、自動でリマインドします。（一度設定すればOKです！）")
+    
+    # 現在のデータベースの設定を取得して、チェックボックスの初期状態にする
+    current_settings = {"monday": False, "tuesday": False, "wednesday": False, "thursday": False, "friday": False}
+    try:
+        res = supabase.schema("public").table("user_schedule").select("*").eq("id", 1).execute()
+        if res.data:
+            current_settings = res.data[0]
+    except:
+        pass
 
-        submit_schedule = st.form_submit_button("スケジュールを更新")
+    with st.form("schedule_form"):
+        col1, col2, col3, col4, col5 = st.columns(5)
+        mon = col1.checkbox("月曜", value=current_settings.get("monday", False))
+        tue = col2.checkbox("火曜", value=current_settings.get("tuesday", False))
+        wed = col3.checkbox("水曜", value=current_settings.get("wednesday", False))
+        thu = col4.checkbox("木曜", value=current_settings.get("thursday", False))
+        fri = col5.checkbox("金曜", value=current_settings.get("friday", False))
+
+        submit_schedule = st.form_submit_button("曜日設定を保存")
 
         if submit_schedule:
             data = {
-                "target_date": target_date.isoformat(),
-                "has_first_period": has_first_period,
+                "id": 1,
+                "monday": mon,
+                "tuesday": tue,
+                "wednesday": wed,
+                "thursday": thu,
+                "friday": fri
             }
             try:
-                supabase.schema("public").table("schedules").insert(data).execute()
-                st.success("予定を保存しました。これで明日の準備もバッチリですね。")
+                # 既存のデータを上書き（upsert）する
+                supabase.schema("public").table("user_schedule").upsert(data).execute()
+                st.success("曜日設定を保存・更新しました！明日の分から自動で判定します。")
                 st.rerun()
             except Exception as e:
                 st.error(f"保存に失敗しました: {e}")
@@ -159,9 +180,7 @@ with tab3:
                 data = {"title": title, "due_date": due_date.isoformat()}
                 try:
                     supabase.schema("public").table("assignments").insert(data).execute()
-                    st.success(
-                        f"「{title}」を登録しました。締切を意識できているだけで一歩前進です！"
-                    )
+                    st.success(f"「{title}」を登録しました。締切を意識できているだけで一歩前進です！")
                     st.rerun()
                 except Exception as e:
                     st.error(f"保存に失敗しました: {e}")
