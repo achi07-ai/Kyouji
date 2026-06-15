@@ -6,12 +6,13 @@ from supabase import create_client, Client
 st.set_page_config(page_title="Moochi Moochi プロトタイプ", page_icon="🤖", layout="centered")
 
 # ---------------------------------------------------------
-# 🔑 Supabase 接続の初期化
+# 🔑 Supabase 接続の初期化（最もエラーの起きない記述に変更）
 # ---------------------------------------------------------
 @st.cache_resource
 def init_supabase() -> Client:
-    url = st.secrets["connections"]["supabase"]["SUPABASE_URL"]
-    key = st.secrets["connections"]["supabase"]["SUPABASE_KEY"]
+    # 階層を作らず、直接シークレットから値を読み込みます
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
     return create_client(url, key)
 
 try:
