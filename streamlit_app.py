@@ -1,25 +1,12 @@
 import datetime
 import streamlit as st
-from supabase import create_client, Client
+from st_supabase_connection import SupabaseConnection
 
 # ページ設定
 st.set_page_config(page_title="Moochi Moochi プロトタイプ", page_icon="🤖", layout="centered")
 
-# ---------------------------------------------------------
-# 🔑 Supabase 接続の初期化（公式 supabase-py 版）
-# ---------------------------------------------------------
-@st.cache_resource
-def init_supabase() -> Client:
-    # .streamlit/secrets.toml から認証情報を取得
-    url = st.secrets["connections"]["supabase"]["SUPABASE_URL"]
-    key = st.secrets["connections"]["supabase"]["SUPABASE_KEY"]
-    return create_client(url, key)
-
-try:
-    supabase: Client = init_supabase()
-except Exception as e:
-    st.error(f"Supabaseへの接続初期化に失敗しました。Secretsの設定を確認してください: {e}")
-    st.stop()
+# Supabase 接続の初期化
+conn = st.connection("supabase", type=SupabaseConnection)
 
 
 # ---------------------------------------------------------
@@ -34,30 +21,29 @@ def check_reminders():
 
     reminders_triggered = False
 
-    # 1. 翌日の1限チェック [cite: 26, 42]
+    # 1. 翌日の1限チェック
     try:
-        # 明日の日付のスケジュールを明示的に public スキーマから取得
         schedule_res = (
-            supabase.table("schedules")
+            conn.table("schedules")
             .select("has_first_period")
-            .eq("target_date", tomorrow.isoformat())
+            .eq("target_date", tomorrow)
             .execute()
         )
         if schedule_res.data and schedule_res.data[0]["has_first_period"]:
             st.info(
                 "💬 **明日の一限をクリアすれば、週末のゲーム時間がもっと最高になりますよ！** "
-                "今夜は少しだけ早めに布団に入ってみませんか？" # [cite: 38]
+                "今夜は少しだけ早めに布団に入ってみませんか？"
             )
             reminders_triggered = True
     except Exception as e:
         st.error(f"スケジュール確認エラー: {e}")
 
-    # 2. 2日後の宿題締切チェック [cite: 26, 42]
+    # 2. 2日後の宿題締切チェック
     try:
         assignment_res = (
-            supabase.table("assignments")
+            conn.table("assignments")
             .select("title")
-            .eq("due_date", two_days_later.isoformat())
+            .eq("due_date", two_days_later)
             .execute()
         )
         if assignment_res.data:
@@ -70,7 +56,7 @@ def check_reminders():
     except Exception as e:
         st.error(f"課題確認エラー: {e}")
 
-    # リマインダーがない場合の並走フィードバック [cite: 43]
+    # リマインダーがない場合の並走フィードバック
     if not reminders_triggered:
         st.success(
             "💬 今日も自分のペースで進めていきましょう！何かあればいつでも声をかけてくださいね。"
@@ -81,7 +67,7 @@ def check_reminders():
 # 📱 UI・入力フォーム
 # ---------------------------------------------------------
 st.title("🤖 Moochi Moochi プロトタイプ")
-st.write("〜 監視ゼロ。あなたの自律的な生活にそっと寄り添う伴走AI 〜") # [cite: 18, 21, 22]
+st.write("〜 監視ゼロ。あなたの自律的な生活にそっと寄り添う伴走AI 〜")
 st.markdown("---")
 
 # リマインダーエリアの表示
@@ -93,7 +79,7 @@ tab1, tab2, tab3 = st.tabs(
     ["⏰ 睡眠ログ記入", "📅 明日の予定記入", "📝 宿題・課題登録"]
 )
 
-# --- タブ1: 睡眠時間記入 --- [cite: 27]
+# --- タブ1: 睡眠時間記入 ---
 with tab1:
     st.header("🛏️ 睡眠データの記録")
     with st.form("sleep_form", clear_on_submit=True):
@@ -110,14 +96,14 @@ with tab1:
                 "wake_time": wake_time.isoformat(),
             }
             try:
-                supabase.table("sleep_logs").insert(data).execute()
+                conn.table("sleep_logs").insert(data).execute()
                 st.success(
                     "睡眠ログを保存しました！しっかり記録できているの、素晴らしいですね！"
                 )
             except Exception as e:
                 st.error(f"保存に失敗しました: {e}")
 
-# --- タブ2: 時間割記入 --- [cite: 25]
+# --- タブ2: 時間割記入 ---
 with tab2:
     st.header("📅 明日の時間割・予定")
     with st.form("schedule_form", clear_on_submit=True):
@@ -132,13 +118,13 @@ with tab2:
                 "has_first_period": has_first_period,
             }
             try:
-                supabase.table("schedules").insert(data).execute()
+                conn.table("schedules").insert(data).execute()
                 st.success("予定を保存しました。これで明日の準備もバッチリですね。")
-                st.rerun()  # 画面をリフレッシュして上のリマインダーに即時反映
+                st.rerun()  # リマインダー表示を即時更新
             except Exception as e:
                 st.error(f"保存に失敗しました: {e}")
 
-# --- タブ3: 宿題の提出期限記入 --- [cite: 25]
+# --- タブ3: 宿題の提出期限記入 ---
 with tab3:
     st.header("📝 宿題・課題の提出期限")
     with st.form("assignment_form", clear_on_submit=True):
@@ -153,10 +139,10 @@ with tab3:
             else:
                 data = {"title": title, "due_date": due_date.isoformat()}
                 try:
-                    supabase.table("assignments").insert(data).execute()
+                    conn.table("assignments").insert(data).execute()
                     st.success(
                         f"「{title}」を登録しました。締切を意識できているだけで一歩前進です！"
                     )
-                    st.rerun()  # 画面をリフレッシュして上のリマインダーに即時反映
+                    st.rerun()  # リマインダー表示を即時更新
                 except Exception as e:
                     st.error(f"保存に失敗しました: {e}")
