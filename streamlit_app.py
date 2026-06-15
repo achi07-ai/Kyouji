@@ -44,7 +44,7 @@ def check_reminders():
             .eq("target_date", tomorrow.isoformat())
             .execute()
         )
-        if schedule_res.data and schedule_res.data[0]["has_first_period"]:
+    if schedule_res.data and schedule_res.data[0]["has_first_period"]:
             st.info(
                 "💬 **明日の一限をクリアすれば、週末のゲーム時間がもっと最高になりますよ！** "
                 "今夜は少しだけ早めに布団に入ってみませんか？" # [cite: 38]
