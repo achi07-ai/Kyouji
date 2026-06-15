@@ -1,4 +1,3 @@
-pip install streamlit st-supabase-connection
 import datetime
 import streamlit as st
 from st_supabase_connection import SupabaseConnection
