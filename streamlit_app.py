@@ -23,9 +23,29 @@ except Exception as e:
 
 
 # ---------------------------------------------------------
+# 👤 ユーザー切り替え機能（サイドバー）
+# ---------------------------------------------------------
+st.sidebar.header("👤 ユーザー設定")
+
+# 簡易的なユーザー選択（実務では認証機能に置き換えられます）
+user_options = {
+    "ユーザーA (ID: 1)": 1,
+    "ユーザーB (ID: 2)": 2,
+    "ユーザーC (ID: 3)": 3
+}
+selected_user_label = st.sidebar.selectbox("操作するユーザーを選択してください", list(user_options.keys()))
+current_user_id = user_options[selected_user_label]
+
+# セッション状態にユーザーIDを保存
+st.session_state["current_user_id"] = current_user_id
+
+st.sidebar.write(f"現在、**{selected_user_label}** としてログイン中")
+
+
+# ---------------------------------------------------------
 # 🧠 ARCSモデルに基づく：強制しないリマインダー・エンジン
 # ---------------------------------------------------------
-def check_reminders():
+def check_reminders(user_id):
     st.subheader("🤖 今日のエージェントからのメッセージ")
 
     today = datetime.date.today()
@@ -35,10 +55,9 @@ def check_reminders():
     reminders_triggered = False
 
     # 1. 翌日の「曜日」を判定して1限チェック
-    weekday_idx = tomorrow.weekday() # 0:月, 1:火, 2:水, 3:木, 4:金, 5:土, 6:日
+    weekday_idx = tomorrow.weekday() # 0:月, 1:火, ...
     weekdays_db_cols = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
     
-    # 平日（月〜金）の場合のみデータベースを確認する
     if weekday_idx < 5:
         target_col = weekdays_db_cols[weekday_idx]
         try:
@@ -46,10 +65,9 @@ def check_reminders():
                 supabase.schema("public")
                 .table("user_schedule")
                 .select(target_col)
-                .eq("id", 1)
+                .eq("id", user_id)  # 👈 固定の1から、選択されたuser_idに変更
                 .execute()
             )
-            # 明日の曜日にTrue（1限あり）が設定されているか？
             if schedule_res.data and schedule_res.data[0].get(target_col, False):
                 st.info(
                     "💬 **明日の一限をクリアすれば、週末のゲーム時間がもっと最高になりますよ！** "
@@ -59,12 +77,13 @@ def check_reminders():
         except Exception as e:
             st.error(f"スケジュール確認エラー: {e}")
 
-    # 2. 2日後の宿題締切チェック
+    # 2. 2日後の宿戦締切チェック
     try:
         assignment_res = (
             supabase.schema("public")
             .table("assignments")
             .select("title")
+            .eq("user_id", user_id)  # 👈 ユーザーごとの課題に絞り込み
             .eq("due_date", two_days_later.isoformat())
             .execute()
         )
@@ -78,7 +97,6 @@ def check_reminders():
     except Exception as e:
         st.error(f"課題確認エラー: {e}")
 
-    # リマインダーがない場合の並走フィードバック
     if not reminders_triggered:
         st.success(
             "💬 今日も自分のペースで進めていきましょう！何かあればいつでも声をかけてくださいね。"
@@ -92,8 +110,8 @@ st.title("🤖 Moochi Moochi プロトタイプ")
 st.write("〜 監視ゼロ。あなたの自律的な生活にそっと寄り添う伴走AI 〜")
 st.markdown("---")
 
-# リマインダーエリアの表示
-check_reminders()
+# リマインダーエリアの表示（現在のユーザーIDを引き渡す）
+check_reminders(st.session_state["current_user_id"])
 st.markdown("---")
 
 # タブで入力を分離
@@ -113,6 +131,7 @@ with tab1:
 
         if submit_sleep:
             data = {
+                "user_id": st.session_state["current_user_id"], # 👈 誰のデータか保存
                 "sleep_date": sleep_date.isoformat(),
                 "bedtime": bedtime.isoformat(),
                 "wake_time": wake_time.isoformat(),
@@ -123,15 +142,15 @@ with tab1:
             except Exception as e:
                 st.error(f"保存に失敗しました: {e}")
 
-# --- タブ2: 時間割記入（曜日ベースに進化！） ---
+# --- タブ2: 時間割記入 ---
 with tab2:
     st.header("📅 曜日ごとの1限目設定")
-    st.write("1限目がある曜日にチェックを入れておくと、自動でリマインドします。（一度設定すればOKです！）")
+    st.write("1限目がある曜日にチェックを入れておくと、自動でリマインドします。")
     
-    # 現在のデータベースの設定を取得して、チェックボックスの初期状態にする
     current_settings = {"monday": False, "tuesday": False, "wednesday": False, "thursday": False, "friday": False}
     try:
-        res = supabase.schema("public").table("user_schedule").select("*").eq("id", 1).execute()
+        # 👈 選択中のユーザーIDの設定を取得
+        res = supabase.schema("public").table("user_schedule").select("*").eq("id", st.session_state["current_user_id"]).execute()
         if res.data:
             current_settings = res.data[0]
     except:
@@ -149,7 +168,7 @@ with tab2:
 
         if submit_schedule:
             data = {
-                "id": 1,
+                "id": st.session_state["current_user_id"], # 👈 ユーザーIDをキーにしてupsert
                 "monday": mon,
                 "tuesday": tue,
                 "wednesday": wed,
@@ -157,7 +176,6 @@ with tab2:
                 "friday": fri
             }
             try:
-                # 既存のデータを上書き（upsert）する
                 supabase.schema("public").table("user_schedule").upsert(data).execute()
                 st.success("曜日設定を保存・更新しました！明日の分から自動で判定します。")
                 st.rerun()
@@ -177,7 +195,11 @@ with tab3:
             if not title:
                 st.error("課題名を入力してください。")
             else:
-                data = {"title": title, "due_date": due_date.isoformat()}
+                data = {
+                    "user_id": st.session_state["current_user_id"], # 👈 誰の課題か保存
+                    "title": title, 
+                    "due_date": due_date.isoformat()
+                }
                 try:
                     supabase.schema("public").table("assignments").insert(data).execute()
                     st.success(f"「{title}」を登録しました。締切を意識できているだけで一歩前進です！")
