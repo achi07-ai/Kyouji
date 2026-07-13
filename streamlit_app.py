@@ -111,8 +111,7 @@ def show_sleep_analysis(user_id):
     st.header("📊 睡眠時間の推移")
     
     try:
-        # Supabaseから現在のユーザーの睡眠ログを取得（日付の古い順）
-　　　　 res = (
+        res = (
             supabase.schema("public")
             .table("sleep_logs")
             .select("sleep_date, bedtime, wake_time")
@@ -120,6 +119,7 @@ def show_sleep_analysis(user_id):
             .order("sleep_date")  # 👈 何も指定しない（デフォルトで古い順）、または desc=False と書く
             .execute()
         )
+        # Supabaseから現在のユーザーの睡眠ログを取得（日付の古い順）
         
         if not res.data:
             st.info("表示できる睡眠データがまだありません。まずは睡眠ログを記入してみましょう！")
