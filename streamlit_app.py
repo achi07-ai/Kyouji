@@ -1,4 +1,5 @@
 import datetime
+import pandas as pd
 import streamlit as st
 from supabase import create_client, Client
 
@@ -65,7 +66,7 @@ def check_reminders(user_id):
                 supabase.schema("public")
                 .table("user_schedule")
                 .select(target_col)
-                .eq("id", user_id)  # 👈 固定の1から、選択されたuser_idに変更
+                .eq("id", user_id)
                 .execute()
             )
             if schedule_res.data and schedule_res.data[0].get(target_col, False):
@@ -77,20 +78,20 @@ def check_reminders(user_id):
         except Exception as e:
             st.error(f"スケジュール確認エラー: {e}")
 
-    # 2. 2日後の宿戦締切チェック
+    # 2. 2日後の宿題締切チェック
     try:
         assignment_res = (
             supabase.schema("public")
             .table("assignments")
             .select("title")
-            .eq("user_id", user_id)  # 👈 ユーザーごとの課題に絞り込み
+            .eq("user_id", user_id)
             .eq("due_date", two_days_later.isoformat())
             .execute()
         )
         if assignment_res.data:
             for item in assignment_res.data:
                 st.warning(
-                    f"💬 2日後に **【{item['title']}】** の締切がありますね。"
+                    "💬 2日後に **【" + item['title'] + "】** の締切がありますね。"
                     "今日のうちにちょっとだけ進めておくと、明日の夜がグッと楽になって自分の時間が作れるかもしれません！"
                 )
             reminders_triggered = True
@@ -104,7 +105,58 @@ def check_reminders(user_id):
 
 
 # ---------------------------------------------------------
-# 📱 UI・入力フォーム
+# 📊 睡眠データの可視化用関数
+# ---------------------------------------------------------
+def show_sleep_analysis(user_id):
+    st.header("📊 睡眠時間の推移")
+    
+    try:
+        # Supabaseから現在のユーザーの睡眠ログを取得（日付の古い順）
+        res = (
+            supabase.schema("public")
+            .table("sleep_logs")
+            .select("sleep_date, bedtime, wake_time")
+            .eq("user_id", user_id)
+            .order("sleep_date", ascending=True)
+            .execute()
+        )
+        
+        if not res.data:
+            st.info("表示できる睡眠データがまだありません。まずは睡眠ログを記入してみましょう！")
+            return
+
+        # データをDataFrameに変換
+        df = pd.DataFrame(res.data)
+        
+        # 日付文字列と時刻文字列を結合してdatetime型に変換
+        df['bedtime_dt'] = pd.to_datetime(df['sleep_date'] + ' ' + df['bedtime'])
+        df['wake_time_dt'] = pd.to_datetime(df['sleep_date'] + ' ' + df['wake_time'])
+        
+        # 起床時刻が就寝時刻より前（日をまたぐ睡眠）の場合、起床日を翌日に補正
+        df.loc[df['wake_time_dt'] < df['bedtime_dt'], 'wake_time_dt'] += pd.Timedelta(days=1)
+        
+        # 睡眠時間を計算（時間単位）
+        df['duration_hours'] = (df['wake_time_dt'] - df['bedtime_dt']).dt.total_seconds() / 3600
+        
+        # グラフ表示用に整形（インデックスを日付にする）
+        chart_data = df.set_index('sleep_date')[['duration_hours']]
+        chart_data.columns = ['睡眠時間 (時間)']
+        
+        # 折れ線グラフの描画
+        st.line_chart(chart_data)
+        
+        # 平均睡眠時間の算出とフィードバック
+        avg_sleep = df['duration_hours'].mean()
+        st.write(f"💡 これまでの平均睡眠時間は **{avg_sleep:.1f} 時間** です。")
+        if 6 <= avg_sleep <= 8:
+            st.success("💬 とても理想的な睡眠時間をキープできていますね！素晴らしい生活リズムです。")
+            
+    except Exception as e:
+        st.error(f"データの読み込みまたはグラフの描画に失敗しました: {e}")
+
+
+# ---------------------------------------------------------
+# 📱 UI・メイン画面
 # ---------------------------------------------------------
 st.title("🤖 Moochi Moochi プロトタイプ")
 st.write("〜 監視ゼロ。あなたの自律的な生活にそっと寄り添う伴走AI 〜")
@@ -114,9 +166,9 @@ st.markdown("---")
 check_reminders(st.session_state["current_user_id"])
 st.markdown("---")
 
-# タブで入力を分離
-tab1, tab2, tab3 = st.tabs(
-    ["⏰ 睡眠ログ記入", "📅 曜日ごとの1限設定", "📝 宿題・課題登録"]
+# タブで入力を分離（睡眠分析タブを追加）
+tab1, tab2, tab3, tab4 = st.tabs(
+    ["⏰ 睡眠ログ記入", "📊 睡眠分析", "📅 曜日ごとの1限設定", "📝 宿題・課題登録"]
 )
 
 # --- タブ1: 睡眠時間記入 ---
@@ -131,7 +183,7 @@ with tab1:
 
         if submit_sleep:
             data = {
-                "user_id": st.session_state["current_user_id"], # 👈 誰のデータか保存
+                "user_id": st.session_state["current_user_id"],
                 "sleep_date": sleep_date.isoformat(),
                 "bedtime": bedtime.isoformat(),
                 "wake_time": wake_time.isoformat(),
@@ -139,17 +191,21 @@ with tab1:
             try:
                 supabase.schema("public").table("sleep_logs").insert(data).execute()
                 st.success("睡眠ログを保存しました！しっかり記録できているの、素晴らしいですね！")
+                st.rerun()  # グラフに即時反映させるため画面を再読込
             except Exception as e:
                 st.error(f"保存に失敗しました: {e}")
 
-# --- タブ2: 時間割記入 ---
+# --- タブ2: 睡眠分析 ---
 with tab2:
+    show_sleep_analysis(st.session_state["current_user_id"])
+
+# --- タブ3: 時間割記入 ---
+with tab3:
     st.header("📅 曜日ごとの1限目設定")
     st.write("1限目がある曜日にチェックを入れておくと、自動でリマインドします。")
     
     current_settings = {"monday": False, "tuesday": False, "wednesday": False, "thursday": False, "friday": False}
     try:
-        # 👈 選択中のユーザーIDの設定を取得
         res = supabase.schema("public").table("user_schedule").select("*").eq("id", st.session_state["current_user_id"]).execute()
         if res.data:
             current_settings = res.data[0]
@@ -168,7 +224,7 @@ with tab2:
 
         if submit_schedule:
             data = {
-                "id": st.session_state["current_user_id"], # 👈 ユーザーIDをキーにしてupsert
+                "id": st.session_state["current_user_id"],
                 "monday": mon,
                 "tuesday": tue,
                 "wednesday": wed,
@@ -182,8 +238,8 @@ with tab2:
             except Exception as e:
                 st.error(f"保存に失敗しました: {e}")
 
-# --- タブ3: 宿題の提出期限記入 ---
-with tab3:
+# --- タブ4: 宿題の提出期限記入 ---
+with tab4:
     st.header("📝 宿題・課題の提出期限")
     with st.form("assignment_form", clear_on_submit=True):
         title = st.text_input("課題名（例: データサイエンス基礎 レポート）")
@@ -196,7 +252,7 @@ with tab3:
                 st.error("課題名を入力してください。")
             else:
                 data = {
-                    "user_id": st.session_state["current_user_id"], # 👈 誰の課題か保存
+                    "user_id": st.session_state["current_user_id"],
                     "title": title, 
                     "due_date": due_date.isoformat()
                 }
