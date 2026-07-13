@@ -112,12 +112,12 @@ def show_sleep_analysis(user_id):
     
     try:
         # Supabaseから現在のユーザーの睡眠ログを取得（日付の古い順）
-        res = (
+　　　　 res = (
             supabase.schema("public")
             .table("sleep_logs")
             .select("sleep_date, bedtime, wake_time")
             .eq("user_id", user_id)
-            .order("sleep_date", ascending=True)
+            .order("sleep_date")  # 👈 何も指定しない（デフォルトで古い順）、または desc=False と書く
             .execute()
         )
         
