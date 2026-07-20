@@ -105,47 +105,64 @@ def check_reminders(user_id):
 
 
 # ---------------------------------------------------------
-# 📊 睡眠データの可視化用関数
+# 📊 睡眠データの可視化用関数（改良版）
 # ---------------------------------------------------------
 def show_sleep_analysis(user_id):
-    st.header("📊 睡眠時間の推移")
+    st.header("📊 睡眠データの分析")
     
     try:
+        # Supabaseからデータを取得（先ほどのエラー修正済みの .order("sleep_date") ）
         res = (
             supabase.schema("public")
             .table("sleep_logs")
             .select("sleep_date, bedtime, wake_time")
             .eq("user_id", user_id)
-            .order("sleep_date")  # 👈 何も指定しない（デフォルトで古い順）、または desc=False と書く
+            .order("sleep_date")
             .execute()
         )
-        # Supabaseから現在のユーザーの睡眠ログを取得（日付の古い順）
         
         if not res.data:
             st.info("表示できる睡眠データがまだありません。まずは睡眠ログを記入してみましょう！")
             return
 
-        # データをDataFrameに変換
         df = pd.DataFrame(res.data)
         
-        # 日付文字列と時刻文字列を結合してdatetime型に変換
+        # --- 1. 睡眠時間の計算 ---
         df['bedtime_dt'] = pd.to_datetime(df['sleep_date'] + ' ' + df['bedtime'])
         df['wake_time_dt'] = pd.to_datetime(df['sleep_date'] + ' ' + df['wake_time'])
-        
-        # 起床時刻が就寝時刻より前（日をまたぐ睡眠）の場合、起床日を翌日に補正
         df.loc[df['wake_time_dt'] < df['bedtime_dt'], 'wake_time_dt'] += pd.Timedelta(days=1)
-        
-        # 睡眠時間を計算（時間単位）
         df['duration_hours'] = (df['wake_time_dt'] - df['bedtime_dt']).dt.total_seconds() / 3600
         
-        # グラフ表示用に整形（インデックスを日付にする）
-        chart_data = df.set_index('sleep_date')[['duration_hours']]
-        chart_data.columns = ['睡眠時間 (時間)']
+        # --- 2. 時刻をグラフ用の数値（10進数）に変換 ---
+        def time_str_to_float(time_str, is_bedtime=False):
+            # "23:30:00" のような文字列を 23.5 のような数値に変換
+            parts = time_str.split(':')
+            val = int(parts[0]) + int(parts[1]) / 60.0
+            
+            # 就寝時刻が 0:00〜5:00 の場合は、グラフを繋げるために 24〜29 として扱う
+            if is_bedtime and val < 6.0:
+                val += 24.0
+            return val
+
+        # それぞれ数値に変換した新しい列を作成
+        df['bedtime_num'] = df['bedtime'].apply(lambda x: time_str_to_float(x, is_bedtime=True))
+        df['wake_time_num'] = df['wake_time'].apply(lambda x: time_str_to_float(x, is_bedtime=False))
         
-        # 折れ線グラフの描画
-        st.line_chart(chart_data)
+        # --- グラフ①：睡眠時間の推移 ---
+        st.subheader("⏱️ 睡眠時間の推移")
+        chart_data_duration = df.set_index('sleep_date')[['duration_hours']]
+        chart_data_duration.columns = ['睡眠時間 (時間)']
+        st.line_chart(chart_data_duration)
         
-        # 平均睡眠時間の算出とフィードバック
+        # --- グラフ②：就寝・起床時刻の推移 ---
+        st.subheader("🌙 就寝・起床時刻の推移")
+        st.caption("※ 就寝時刻が深夜0時を過ぎている場合、グラフ上では 24, 25 (＝24時, 25時) のように表現されます。")
+        chart_data_time = df.set_index('sleep_date')[['bedtime_num', 'wake_time_num']]
+        chart_data_time.columns = ['就寝時刻', '起床時刻']
+        # 折れ線グラフを描画
+        st.line_chart(chart_data_time)
+        
+        # --- 平均などのフィードバック ---
         avg_sleep = df['duration_hours'].mean()
         st.write(f"💡 これまでの平均睡眠時間は **{avg_sleep:.1f} 時間** です。")
         if 6 <= avg_sleep <= 8:
@@ -153,8 +170,6 @@ def show_sleep_analysis(user_id):
             
     except Exception as e:
         st.error(f"データの読み込みまたはグラフの描画に失敗しました: {e}")
-
-
 # ---------------------------------------------------------
 # 📱 UI・メイン画面
 # ---------------------------------------------------------
